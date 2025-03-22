@@ -19,7 +19,7 @@ endif()
 add_executable(codegen src/codegen.cpp)
 target_include_directories(codegen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-set(GENERATED_HEADER ${CMAKE_BINARY_DIR}/tensor.hpp)
+set(GENERATED_HEADER ${CMAKE_BINARY_DIR}/tensor/tensor.hpp)
 
 add_custom_command(
     OUTPUT ${GENERATED_HEADER}
@@ -28,11 +28,19 @@ add_custom_command(
     COMMENT "Generating header file"
     VERBATIM
 )
+
 add_custom_target(generate_header
     DEPENDS ${GENERATED_HEADER}
 )
 
 add_executable(test src/test.cpp ${GENERATED_HEADER})
 add_dependencies(test generate_header)
-target_include_directories(test PRIVATE ${CMAKE_BINARY_DIR})
+target_include_directories(test PRIVATE ${CMAKE_BINARY_DIR}/tensor/)
 
+add_custom_command(
+    TARGET test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E echo "Running test application..."
+    COMMAND $<TARGET_FILE:test>
+    COMMAND ${CMAKE_COMMAND} -E echo "Test completed successfully."
+    COMMENT "Executing test binary after build"
+)
