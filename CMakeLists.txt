@@ -16,9 +16,10 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_CXX_FLAGS_RELEASE "-march=native -Ofast -DNDEBUG")
 endif()
 
-add_executable(codegen src/codegen/main.cpp)
+add_executable(codegen src/codegen.cpp)
+target_include_directories(codegen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-set(GENERATED_HEADER ${CMAKE_BINARY_DIR}/include/tensor.hpp)
+set(GENERATED_HEADER ${CMAKE_BINARY_DIR}/tensor.hpp)
 
 add_custom_command(
     OUTPUT ${GENERATED_HEADER}
@@ -30,7 +31,8 @@ add_custom_command(
 add_custom_target(generate_header
     DEPENDS ${GENERATED_HEADER}
 )
-add_executable(test src/test/main.cpp ${GENERATED_HEADER})
+
+add_executable(test src/test.cpp ${GENERATED_HEADER})
 add_dependencies(test generate_header)
-target_include_directories(test PRIVATE ${CMAKE_BINARY_DIR}/include)
+target_include_directories(test PRIVATE ${CMAKE_BINARY_DIR})
 
