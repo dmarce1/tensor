@@ -8,9 +8,11 @@
 #include <set>
 #include <vector>
 
-static constexpr int ORDER = 4;
+static constexpr int ORDER = 5;
 
-std::vector<std::vector<std::pair<int, std::vector<int>>>> possibleSymmetries(int rank) {
+using SymmetriesType = std::vector<std::vector<std::pair<int, std::vector<int>>>>;
+
+SymmetriesType possibleSymmetries(int rank) {
 	std::vector<std::vector<std::pair<int, std::vector<int>>>> result;
 	if (rank > 1) {
 		std::vector<int> indices(rank, 0);
@@ -81,26 +83,34 @@ std::vector<std::vector<std::pair<int, std::vector<int>>>> possibleSymmetries(in
 	return result;
 }
 
-std::string tensorTypeString(int rank, std::vector<std::pair<int, std::vector<int>>> const &symmetry) {
-	std::string str = "Tensor<T, D, " + std::to_string(rank);
+std::string symmetryString(int rank, std::vector<std::pair<int, std::vector<int>>> const &symmetry) {
+	std::string str;
 	for (auto symGroup : symmetry) {
-		str += symGroup.first ? ", Symmetry<" : ", Antisymmetry<";
+		str += symGroup.first ? "Symmetry<" : "Antisymmetry<";
 		for (size_t j = 0; j < symGroup.second.size(); j++) {
 			str += std::to_string(symGroup.second[j]);
 			str += (j + 1 < symGroup.second.size()) ? ", " : "";
 		}
-		str += ">";
+		str += ">, ";
+	}
+	if (symmetry.size() >= 1) {
+		str.pop_back();
+		str.pop_back();
+	}
+	return str;
+}
+
+std::string tensorTypeString(int rank, std::vector<std::pair<int, std::vector<int>>> const &symmetry) {
+	std::string str = "Tensor<T, D, " + std::to_string(rank);
+	if (symmetry.size() > 0) {
+		str += ", " + symmetryString(rank, symmetry);
 	}
 	str += ">";
 	return str;
 }
 
-void TensorDeclaration(CodeGen &code, int rank) {
+void TensorDeclaration(CodeGen &code, int rank, SymmetriesType const &symmetries) {
 	std::string str;
-	auto symmetries = possibleSymmetries(rank);
-	if (symmetries.size() == 0) {
-		symmetries.resize(1);
-	}
 	for (auto const &symmetry : symmetries) {
 		auto const typeString = tensorTypeString(rank, symmetry);
 		code.print("template<typename T, size_t D>");
@@ -110,7 +120,7 @@ void TensorDeclaration(CodeGen &code, int rank) {
 			std::string str;
 			str = "constexpr T";
 			str += constVersion ? " const" : "";
-			str += "& operator[](";
+			str += "& operator()(";
 			for (int r = 0; r < rank; r++) {
 				str += "size_t";
 				str += (r + 1 < rank) ? ", " : "";
@@ -228,15 +238,12 @@ void TensorDeclaration(CodeGen &code, int rank) {
 	}
 }
 
-void TensorImplementation(CodeGen &code, int rank) {
+void TensorImplementation(CodeGen &code, int rank, SymmetriesType const &symmetries) {
 	std::string str;
-	auto symmetries = possibleSymmetries(rank);
-	if (symmetries.size() == 0) {
-		symmetries.resize(1);
-	}
 	for (auto const &symmetry : symmetries) {
 		std::unordered_map<char, int> sMap;
 		auto const typeString = tensorTypeString(rank, symmetry);
+		auto const symString = symmetryString(rank, symmetry);
 		for (int i = 0; i < rank; i++) {
 			sMap['i' + i] = 0;
 		}
@@ -249,12 +256,12 @@ void TensorImplementation(CodeGen &code, int rank) {
 				genRank--;
 			}
 		}
-		auto const accessOp = [&code, rank, typeString, hasAntisymmetry](bool constVersion) {
+		auto const accessOp = [&code, rank, typeString, symString, hasAntisymmetry](bool constVersion) {
 			std::string str;
 			code.print("template<typename T, size_t D>");
 			str = "constexpr T";
 			str += constVersion ? " const" : "";
-			str += "& " + typeString + "::operator[](";
+			str += "& " + typeString + "::operator()(";
 			for (int r = 0; r < rank; r++) {
 				str += "size_t ";
 				str.push_back('i' + r);
@@ -290,7 +297,7 @@ void TensorImplementation(CodeGen &code, int rank) {
 				if (constVersion) {
 					code.print("return T(0);");
 				} else {
-					code.print("throw std::runtime_error(\"Exception in T %s::operator[](...).\\n\");", typeString);
+					code.print("throw std::runtime_error(\"Exception in T %s::operator()(...).\\n\");", typeString);
 				}
 				code.dedent();
 				code.print("}");
@@ -342,7 +349,8 @@ void TensorImplementation(CodeGen &code, int rank) {
 				str += constVersion ? " const {" : " {";
 				code.print(str);
 				code.indent();
-				str = "return TensorExpression<" + typeString + " const&, D, " + std::to_string(rank) + ", " + charString2 + ">([this";
+
+				str = "auto f = [this";
 				for (int r = 0; r < rank; r++) {
 					if (!((bits >> r) & 1)) {
 						str += ", ";
@@ -371,7 +379,8 @@ void TensorImplementation(CodeGen &code, int rank) {
 				}
 				code.print("return this->operator()(%s);", str);
 				code.dedent();
-				code.print("});");
+				code.print("};");
+				code.print("return TensorExpression<decltype(f), D, %i, std::tuple<%s>, %s>(std::move(f));", rank, symString, charString2);
 				code.dedent();
 				code.print("}");
 			}
@@ -394,7 +403,6 @@ void TensorImplementation(CodeGen &code, int rank) {
 		code.print(str);
 		code.indent();
 		int si = 0;
-		bool flag = true;
 		for (auto symGroup : symmetry) {
 			if (symGroup.second.size()) {
 				auto const &sym = symGroup.second;
@@ -423,7 +431,6 @@ void TensorImplementation(CodeGen &code, int rank) {
 				code.print(str);
 				str = "";
 				si++;
-				flag = false;
 			}
 		}
 		if (hasAntisymmetry) {
@@ -520,50 +527,131 @@ void TensorImplementation(CodeGen &code, int rank) {
 	code.newline();
 }
 
-void expressionDeclaration(CodeGen &code, int rank) {
+void expressionDeclaration(CodeGen &code, int rank, SymmetriesType const &symmetries) {
 	std::string str;
-	str = "template<typename T, size_t D";
-	for (int r = 0; r < rank; r++) {
-		str += ", char ";
-		str.push_back('I' + r);
+	for (auto const &symmetry : symmetries) {
+		std::unordered_map<char, int> sMap;
+		auto const symString = symmetryString(rank, symmetry);
+		str = "template<typename T, size_t D";
+		for (int r = 0; r < rank; r++) {
+			str += ", char ";
+			str.push_back('I' + r);
+		}
+		str += ">";
+		code.print(str);
+		str = "";
+		std::vector<char> charString;
+		for (int r = 0; r < rank; r++) {
+			str += ", ";
+			str.push_back('I' + r);
+			charString.push_back('I' + r);
+		}
+		code.print("struct TensorExpression<T, D, %i, std::tuple<%s>%s> {", rank, symString, str);
+		code.indent();
+		code.print("TensorExpression(T);");
+		do {
+			code.print("template<typename S>");
+			str = "constexpr auto operator=(TensorExpression<T, D, " + std::to_string(rank) + ", S";
+			for (int r = 0; r < rank; r++) {
+				str += ", ";
+				str.push_back(charString[r]);
+			}
+			str += "> const&);";
+			code.print(str);
+
+		} while (std::next_permutation(charString.begin(), charString.end()));
+		code.print("private:");
+		code.print("T handle;");
+		code.dedent();
+		code.print("};");
+		code.newline();
 	}
-	str += ">";
-	code.print(str);
-	str = "";
-	for (int r = 0; r < rank; r++) {
-		str += ", ";
-		str.push_back('I' + r);
-	}
-	code.print("struct TensorExpression<T, D, %i%s> {", rank, str);
-	code.indent();
-	code.print("TensorExpression(T);");
-	code.print("private:");
-	code.print("T handle;");
-	code.dedent();
-	code.print("};");
-	code.newline();
 }
 
-void expressionImplementation(CodeGen &code, int rank) {
+void expressionImplementation(CodeGen &code, int rank, SymmetriesType const &symmetries) {
 	std::string str;
-	str = "template<typename T, size_t D";
-	str += rank ? " " : "";
-	for (int r = 0; r < rank; r++) {
-		str += ", ";
-		str += "char ";
-		str.push_back('I' + r);
+	for (auto const &symmetry : symmetries) {
+		std::unordered_map<char, int> sMap;
+		auto const symString = symmetryString(rank, symmetry);
+		str = "template<typename T, size_t D";
+		for (int r = 0; r < rank; r++) {
+			str += ", ";
+			str += "char ";
+			str.push_back('I' + r);
+		}
+		str += ">";
+		std::string const tempStr = str;
+		code.print(str);
+		str = "";
+		std::vector<char> charString;
+		for (int r = 0; r < rank; r++) {
+			str += ", ";
+			str.push_back('I' + r);
+			charString.push_back('I' + r);
+		}
+		std::string const typeString = "TensorExpression<T, D, " + std::to_string(rank) + ", std::tuple<" + symString + ">" + str + ">";
+		code.print("%s::TensorExpression(T h) : handle(h) {", typeString);
+		code.indent();
+		code.dedent();
+		code.print("}");
+		code.newline();
+		std::unordered_map<size_t, size_t> symPredeccessor;
+		std::unordered_map<size_t, size_t> symType;
+		for (auto symGroup : symmetry) {
+			for (size_t j = 1; j < symGroup.second.size(); j++) {
+				symPredeccessor[symGroup.second[j]] = symGroup.second[j - 1];
+			}
+			for (size_t j = 0; j < symGroup.second.size(); j++) {
+				symType[symGroup.second[j]] = symGroup.first ? +1 : -1;
+			}
+		}
+		do {
+			code.print("%s", tempStr);
+			code.print("template<typename S>");
+			str = "constexpr auto " + typeString + "::operator=(TensorExpression<T, D, " + std::to_string(rank) + ", S";
+			for (int r = 0; r < rank; r++) {
+				str += ", ";
+				str.push_back(charString[r]);
+			}
+			str += "> const& other) {";
+			code.print(str);
+			code.indent();
+			for (int r = 0; r < rank; r++) {
+				char const c = 'i' + r;
+				if (symPredeccessor.find(r) != symPredeccessor.end()) {
+					char const c2 = symPredeccessor[r] + 'i';
+					if (symType[r] == +1) {
+						code.print("for (size_t %c = 0; %c <= %c; %c++) {", c, c, c2, c);
+					} else {
+						code.print("for (size_t %c = 0; %c < %c; %c++) {", c, c, c2, c);
+					}
+				} else {
+					code.print("for (size_t %c = 0; %c < D; %c++) {", c, c, c);
+				}
+				code.indent();
+			}
+			str = "handle(";
+			for (int r = 0; r < rank; r++) {
+				str += r ? ", " : "";
+				char const c = 'i' + r;
+				str.push_back(c);
+			}
+			str += ") = other(";
+			for (int r = 0; r < rank; r++) {
+				str += r ? ", " : "";
+				str.push_back(charString[r] + 'a' - 'A');
+			}
+			str += ");";
+			code.print(str);
+			for (int r = 0; r < rank; r++) {
+				code.dedent();
+				code.print("}");
+			}
+			code.dedent();
+			code.print("}");
+			code.newline();
+		} while (std::next_permutation(charString.begin(), charString.end()));
 	}
-	str += ">";
-	code.print(str);
-	str = "";
-	for (int r = 0; r < rank; r++) {
-		str += ", ";
-		str.push_back('I' + r);
-	}
-	code.print("TensorExpression<T, D, %i%s>::TensorExpression(T h) : handle(h) {", rank, str);
-	code.indent();
-	code.dedent();
-	code.print("}");
 	code.newline();
 }
 
@@ -581,7 +669,7 @@ void forwardDeclarations(CodeGen &code) {
 	code.print("template<typename, size_t, size_t, typename...>");
 	code.print("struct Tensor;");
 	code.newline();
-	code.print("template<typename, size_t, size_t, char...>");
+	code.print("template<typename, size_t, size_t, typename, char...>");
 	code.print("struct TensorExpression;");
 	code.newline();
 }
@@ -615,12 +703,21 @@ void includeFiles(CodeGen &code) {
 	code.print("#include <array>");
 	code.print("#include <cstddef>");
 	code.print("#include <stdexcept>");
+	code.print("#include <tuple>");
 	code.print("#include <utility>");
 	code.newline();
 }
 
 std::string generate() {
 	CodeGen code;
+	std::vector<SymmetriesType> symmetries;
+	for (int r = 0; r <= ORDER; r++) {
+		auto syms = possibleSymmetries(r);
+		if (syms.size() == 0) {
+			syms.resize(1);
+		}
+		symmetries.push_back(std::move(syms));
+	}
 	code.print("#pragma once");
 	code.newline();
 	includeFiles(code);
@@ -635,20 +732,20 @@ std::string generate() {
 	code.newline();
 	code.sectionComment("Tensor Declarations");
 	for (int r = 0; r <= ORDER; r++) {
-		TensorDeclaration(code, r);
+		TensorDeclaration(code, r, symmetries[r]);
 	}
 	code.sectionComment("Expression Declarations");
 	for (int r = 0; r <= ORDER; r++) {
-		expressionDeclaration(code, r);
+		expressionDeclaration(code, r, symmetries[r]);
 	}
 	code.newline();
 	code.sectionComment("Tensor Implementations");
 	for (int r = 0; r <= ORDER; r++) {
-		TensorImplementation(code, r);
+		TensorImplementation(code, r, symmetries[r]);
 	}
 	code.sectionComment("Expression Implementations");
 	for (int r = 0; r <= ORDER; r++) {
-		expressionImplementation(code, r);
+		expressionImplementation(code, r, symmetries[r]);
 	}
 	code.newline();
 	code.print("}");
