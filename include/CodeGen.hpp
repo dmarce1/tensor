@@ -31,6 +31,9 @@ struct CodeGen {
 		}
 		return str;
 	}
+	void stringToFile(std::string const str) {
+		generatedCode += "\n" + str + "\n";
+	}
 	void print(std::string const &line) {
 		if (line[0] != '#' && line.back() != ':') {
 			generatedCode += getIndention();
