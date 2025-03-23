@@ -40,7 +40,7 @@ struct Symmetry {
 };
 
 template<size_t D, size_t R, size_t NS, size_t NA>
-auto indexMap(std::array<std::array<size_t, R>, NS> sym, std::array<std::array<size_t, R>, NA> ant) {
+auto genIndexMap(std::array<std::array<size_t, R>, NS> sym, std::array<std::array<size_t, R>, NA> ant) {
 	static constexpr size_t Size = std::pow(D, R);
 	std::array<size_t, Size> map;
 	std::array<int, Size> sgn;
@@ -122,14 +122,18 @@ auto indexMap(std::array<std::array<size_t, R>, NS> sym, std::array<std::array<s
 }
 
 void indexMapDeclaration(CodeGen &code) {
-	const char *headerString = "template<size_t, size_t R, size_t N, size_t M>\n"
-			"static constexpr auto indexMap(std::array<std::array<size_t, R>, N>, std::array<std::array<size_t, R>, M>);\n";
-	code.stringToFile(headerString);
+	const char *codeString = "template<size_t, size_t R, auto...S>\n"
+			"static constexpr auto genIndexMap(Symmetries<R, S...> const&);\n";
+	code.stringToFile(codeString);
+	code.print("template<size_t D, size_t R, size_t N, size_t M>");
+	code.print("static constexpr auto uniqueTuples(std::array<size_t, M> const&, std::array<int, M> const&);");
 
 }
+
 void indexMap2Header(CodeGen &code) {
-	const char *codeString = "template<size_t D, size_t R, size_t N, size_t M>\n"
-			"static constexpr auto indexMap(std::array<std::array<size_t, R>, N> sym, std::array<std::array<size_t, R>, M> ant) {\n"
+	const char *codeString = "template<size_t D, size_t R, auto...S>\n"
+			"static constexpr auto genIndexMap(Symmetries<R, S...> const& sym) {\n"
+			"    static constexpr size_t N = Symmetries<R, S...>::Size;\n"
 			"    static constexpr size_t Size = std::pow(D, R);\n"
 			"    std::array<size_t, Size> map;\n"
 			"    std::array<int, Size> sgn;\n"
@@ -154,7 +158,7 @@ void indexMap2Header(CodeGen &code) {
 			"    while (s--) {\n"
 			"        size_t index = I2i(indices);\n"
 			"        if (!visited[index]) {\n"
-			"            static constexpr size_t symCount = 1 << (N + M);\n"
+			"            static constexpr size_t symCount = (1 << N);\n"
 			"            std::array<int, symCount> signs = { 0 };\n"
 			"            std::array<size_t, symCount> theseIndexes;\n"
 			"            bool zero = false;\n"
@@ -164,18 +168,14 @@ void indexMap2Header(CodeGen &code) {
 			"                auto theseIndices = indices;\n"
 			"                for (size_t k = 0; k < N; k++) {\n"
 			"                    if (theseBits & 1) {\n"
-			"                        theseIndices = permuteIndices(theseIndices, sym[k]);\n"
-			"                    }\n"
-			"                    theseBits >>= 1;\n"
-			"                }\n"
-			"                for (size_t k = 0; k < M; k++) {\n"
-			"                    if (theseBits & 1) {\n"
-			"                        theseIndices = permuteIndices(theseIndices, ant[k]);\n"
-			"                        if (theseIndices == indices) {\n"
-			"                            sgn = 0;\n"
-			"                            zero = true;\n"
-			"                        } else {\n"
-			"                            sgn = -sgn;\n"
+			"                        theseIndices = permuteIndices(theseIndices, sym.symmetries[k].values);\n"
+			"                        if (sym.symmetries[k].sign < 0) {\n"
+			"                            if (theseIndices == indices) {\n"
+			"                                sgn = 0;\n"
+			"                                zero = true;\n"
+			"                            } else {\n"
+			"                                sgn = -sgn;\n"
+			"                            }\n"
 			"                        }\n"
 			"                    }\n"
 			"                    theseBits >>= 1;\n"
@@ -207,21 +207,51 @@ void indexMap2Header(CodeGen &code) {
 			"            std::reverse(indices.begin(), indices.end());\n"
 			"        }\n"
 			"    }\n"
-			"    return std::make_pair(map, sgn);\n"
+			"    return std::make_tuple(map, sgn, nextIndex);\n"
 			"};\n";
 	code.stringToFile(codeString);
+	code.print("template<size_t D, size_t R, size_t N, size_t M>");
+	code.print("static constexpr auto uniqueTuples(std::array<size_t, M> const& map, std::array<int, M> const& sgn) {");
+	code.indent();
+	code.print("std::array<bool, M> visited = {false};");
+	code.print("std::array<std::array<size_t, R>, N> tuples;");
+	code.print("size_t index = 0;");
+	code.print("for (size_t j = 0; j < M; j++) {");
+	code.indent();
+	code.print("if (!visited[map[j]]) {");
+	code.indent();
+	code.print("if (sgn[j] == +1) {");
+	code.indent();
+	code.print("size_t k = map[j];");
+	code.print("for (size_t r = R; r > 0; r--) {");
+	code.indent();
+	code.print("tuples[index][r - 1] = k % D;");
+	code.print("k /= D;");
+	code.dedent();
+	code.print("}");
+	code.print("index++;");
+	code.print("visited[map[j]] = true;");
+	code.dedent();
+	code.print("}");
+	code.dedent();
+	code.print("}");
+	code.dedent();
+	code.print("}");
+	code.print("return tuples;");
+	code.dedent();
+	code.print("}");
 }
 
 std::string tensorTypeString(int rank) {
 	std::string str = "Tensor<T, D, " + std::to_string(rank);
-	str += ">";
+	str += ", S...>";
 	return str;
 }
 
 void TensorDeclaration(CodeGen &code, int rank) {
 	std::string str;
 	auto const typeString = tensorTypeString(rank);
-	code.print("template<typename T, size_t D>");
+	code.print("template<typename T, size_t D, auto...S>");
 	code.print("struct %s {", typeString);
 	code.indent();
 	auto const accessOp = [&code, rank](bool constVersion) {
@@ -279,6 +309,7 @@ void TensorDeclaration(CodeGen &code, int rank) {
 	accessOp(false);
 	accessOp(true);
 	code.print("private:");
+	code.print("static constexpr Symmetries<%i, S...> Syms{};", rank);
 	str = "static constexpr int computeIndex(";
 	for (int r = 0; r < rank; r++) {
 		str += "size_t ";
@@ -319,7 +350,7 @@ void TensorImplementation(CodeGen &code, int rank) {
 	auto const typeString = tensorTypeString(rank);
 	auto const accessOp = [&code, rank, typeString](bool constVersion) {
 		std::string str;
-		code.print("template<typename T, size_t D>");
+		code.print("template<typename T, size_t D, auto...S>");
 		str = "constexpr T";
 		str += constVersion ? " const" : "";
 		str += "& " + typeString + "::operator()(";
@@ -335,6 +366,8 @@ void TensorImplementation(CodeGen &code, int rank) {
 		str += " {";
 		code.print(str);
 		code.indent();
+		code.print("static constexpr Symmetries<%i, S...> symmetries;", rank);
+		code.print("static constexpr auto indexMap = genIndexMap(symmetries);");
 		str = "int const index = computeIndex(";
 		for (int r = 0; r < rank; r++) {
 			str.push_back('i' + r);
@@ -344,14 +377,45 @@ void TensorImplementation(CodeGen &code, int rank) {
 		}
 		str += ");";
 		code.print(str);
+		code.print("if constexpr (symmetries.hasAsymmetry) {");
+		code.indent();
+		code.print("index = std::get<0>(indexMap)[index];");
+		code.print("if ( std::get<1>(indexMap)[index] > 0) {");
+		code.indent();
+		code.print("return V[ std::get<0>(indexMap)[index]];");
+		code.dedent();
+		code.print("} else if (std::get<1>(indexMap)[index] < 0) {");
+		code.indent();
+		code.print("return -V[std::get<0>(indexMap)[index]];");
+		code.dedent();
+		code.print("} else/*if (std::get<1>(indexMap)[index] == 0)*/{");
+		code.indent();
+		if (constVersion) {
+			code.print("static constexpr T zero = T(0);");
+		} else {
+			code.print("static thread_local T zero;");
+			code.print("zero = T(0);");
+		}
+		code.print("return zero;");
+		code.dedent();
+		code.print("}");
+		code.dedent();
+		code.print("} else if constexpr (sizeof...(S)) {");
+		code.indent();
+		code.print("return V[indexMap.first[index]];");
+		code.dedent();
+		code.print("} else {");
+		code.indent();
 		code.print("return V[index];");
+		code.dedent();
+		code.print("}");
 		code.dedent();
 		code.print("}");
 		size_t count = 1 << rank;
 		for (size_t bits = 1; bits < count; bits++) {
 			std::string str;
 			code.newline();
-			code.print("template<typename T, size_t D>");
+			code.print("template<typename T, size_t D, auto...S>");
 			str = "template<";
 			bool first = true;
 			std::string charString1;
@@ -420,7 +484,7 @@ void TensorImplementation(CodeGen &code, int rank) {
 			code.print("return this->operator()(%s);", str);
 			code.dedent();
 			code.print("};");
-			code.print("return TensorExpression<decltype(f), D, %i, %s>(std::move(f));", rank, charString2);
+			code.print("return TensorExpression<decltype(f), D, %i, Symmetries<%i, S...>, %s>(std::move(f));", rank, rank, charString2);
 			code.dedent();
 			code.print("}");
 		}
@@ -429,7 +493,7 @@ void TensorImplementation(CodeGen &code, int rank) {
 	code.newline();
 	accessOp(true);
 	code.newline();
-	code.print("template<typename T, size_t D>");
+	code.print("template<typename T, size_t D, auto...S>");
 	str = "constexpr int " + typeString + "::computeIndex(";
 	for (int r = 0; r < rank; r++) {
 		str += "size_t ";
@@ -443,7 +507,7 @@ void TensorImplementation(CodeGen &code, int rank) {
 	code.print(str);
 	str = "size_t index = ";
 	if (genRank == 0) {
-		str += "0;";
+		str += "0";
 	} else {
 		for (int d = 1; d < genRank; d++) {
 			str += "D";
@@ -466,7 +530,7 @@ void TensorImplementation(CodeGen &code, int rank) {
 
 void expressionDeclaration(CodeGen &code, int rank) {
 	std::string str;
-	str = "template<typename T, size_t D";
+	str = "template<typename T, size_t D, typename S0";
 	for (int r = 0; r < rank; r++) {
 		str += ", char ";
 		str.push_back('I' + r);
@@ -480,11 +544,13 @@ void expressionDeclaration(CodeGen &code, int rank) {
 		str.push_back('I' + r);
 		charString.push_back('I' + r);
 	}
-	code.print("struct TensorExpression<T, D, %i%s> {", rank, str);
+	code.print("struct TensorExpression<T, D, %i, S0%s> {", rank, str);
 	code.indent();
 	code.print("TensorExpression(T);");
+	code.print("static constexpr S0 Syms{};");
 	do {
-		str = "constexpr auto operator=(TensorExpression<T, D, " + std::to_string(rank);
+		code.print("template<typename S1>");
+		str = "constexpr auto operator=(TensorExpression<T, D, " + std::to_string(rank) + ", S1";
 		for (int r = 0; r < rank; r++) {
 			str += ", ";
 			str.push_back(charString[r]);
@@ -502,14 +568,15 @@ void expressionDeclaration(CodeGen &code, int rank) {
 
 void expressionImplementation(CodeGen &code, int rank) {
 	std::string str;
-	str = "template<typename T, size_t D";
+	str = "template<typename T, size_t D, typename S0";
 	for (int r = 0; r < rank; r++) {
 		str += ", ";
 		str += "char ";
 		str.push_back('I' + r);
 	}
 	str += ">";
-	std::string const tempStr = str;
+	std::string const tempStr1 = str;
+	std::string const tempStr2 = "template<typename S1>";
 	code.print(str);
 	str = "";
 	std::vector<char> charString;
@@ -518,15 +585,16 @@ void expressionImplementation(CodeGen &code, int rank) {
 		str.push_back('I' + r);
 		charString.push_back('I' + r);
 	}
-	std::string const typeString = "TensorExpression<T, D, " + std::to_string(rank) + str + ">";
-	code.print("%s::TensorExpression(T h) : handle(h) {", typeString);
+	std::string const typeString = "TensorExpression<T, D, " + std::to_string(rank) + ", S0" + str;
+	code.print("%s>::TensorExpression(T h) : handle(h) {", typeString);
 	code.indent();
 	code.dedent();
 	code.print("}");
 	code.newline();
 	do {
-		code.print("%s", tempStr);
-		str = "constexpr auto " + typeString + "::operator=(TensorExpression<T, D, " + std::to_string(rank);
+		code.print("%s", tempStr1);
+		code.print("%s", tempStr2);
+		str = "constexpr auto " + typeString + ">::operator=(TensorExpression<T, D, " + std::to_string(rank) + ", S1";
 		for (int r = 0; r < rank; r++) {
 			str += ", ";
 			str.push_back(charString[r]);
@@ -534,10 +602,22 @@ void expressionImplementation(CodeGen &code, int rank) {
 		str += "> const& other) {";
 		code.print(str);
 		code.indent();
-		for (int r = 0; r < rank; r++) {
-			char const c = 'i' + r;
-			code.print("for (size_t %c = 0; %c < D; %c++) {", c, c, c);
+		if (rank) {
+			code.print("static constexpr S0 symmetries{};");
+			code.print("static constexpr auto indexMap = genIndexMap(symmetries);");
+			code.print("static constexpr size_t NN = std::get<2>(indexMap);");
+			code.print("static constexpr size_t MM = std::get<0>(indexMap).size();");
+			code.print("static constexpr auto tuples = uniqueTuples<D, %i, NN, MM>(std::get<0>(indexMap), std::get<1>(indexMap));", rank);
+			code.print("for (auto const& indices : tuples) {");
 			code.indent();
+			str = "auto const [";
+			for (int r = 0; r < rank; r++) {
+				str += r ? ", " : "";
+				char const c = 'i' + r;
+				str.push_back(c);
+			}
+			str += "] = indices;";
+			code.print(str);
 		}
 		str = "handle(";
 		for (int r = 0; r < rank; r++) {
@@ -552,7 +632,7 @@ void expressionImplementation(CodeGen &code, int rank) {
 		}
 		str += ");";
 		code.print(str);
-		for (int r = 0; r < rank; r++) {
+		if (rank) {
 			code.dedent();
 			code.print("}");
 		}
@@ -565,19 +645,22 @@ void expressionImplementation(CodeGen &code, int rank) {
 
 void forwardDeclarations(CodeGen &code) {
 	code.newline();
+	code.print("template<size_t>");
+	code.print("struct Symmetry;");
+	code.newline();
+	code.print("template<size_t, auto...>");
+	code.print("struct Symmetries;");
+	code.newline();
 	code.print("template<char>");
 	code.print("struct Index;");
-	indexMapDeclaration(code);
-	code.print("template<typename, size_t, size_t>");
+	code.newline();
+	code.print("template<typename, size_t, size_t R, auto...S>");
 	code.print("struct Tensor;");
 	code.newline();
-	code.print("template<typename, size_t, size_t, char...>");
+	code.print("template<typename, size_t, size_t, typename, char...>");
 	code.print("struct TensorExpression;");
-	code.stringToFile(""
-			"template<int S, size_t R, std::array<size_t, R> V>\n"
-			"struct Symmetry;"
-			"\n"
-			"");
+	code.newline();
+	indexMapDeclaration(code);
 }
 
 void helpers(CodeGen &code) {
@@ -589,21 +672,54 @@ void helpers(CodeGen &code) {
 	code.dedent();
 	code.print("};");
 	indexMap2Header(code);
-	code.stringToFile(""
-			"template<int S, size_t R, std::array<size_t, R> V>\n"
-			"struct Symmetry {\n"
-			"\tstatic constexpr int sign = S;\n"
-			"\tstatic constexpr std::array<size_t, R> values = V;\n"
-			"\tstatic constexpr std::array<size_t, R> iota = [] {\n"
-			"\t\tstd::array<size_t, R> r = { };\n"
-			"\t\tstd::iota(r.begin(), r.end(), size_t(0));\n"
-			"\t\treturn r;\n"
-			"\t}();\n"
-			"\tSymmetry() {\n"
-			"\t\tstatic_assert(std::is_permutation(V.begin(), V.end(), iota.begin()));\n"
-			"\t}\n"
-			"};\n"
-			"");
+	code.print("");
+	code.print("template<size_t R>");
+	code.print("struct Symmetry {");
+	code.indent();
+	code.print("private:");
+	code.print("int const sign;");
+	code.print("std::array<size_t, R> const values;");
+	code.print("static constexpr std::array<size_t, R> iota = [] {");
+	code.indent();
+	code.print("std::array<size_t, R> r = { };");
+	code.print("std::iota(r.begin(), r.end(), size_t(0));");
+	code.print("return r;");
+	code.dedent();
+	code.print("}();");
+	code.print("Symmetry(int s, std::array<size_t, R> const& v ) : sign(s), values(v) {");
+	code.indent();
+	code.print("static_assert(std::is_permutation(values.begin(), values.end(), iota.begin()));");
+	code.dedent();
+	code.print("}");
+	code.dedent();
+	code.print("};");
+	code.newline();
+	code.print("template<size_t R, auto...I>");
+	code.print("struct Symmetries { ");
+	code.indent();
+	code.print("static constexpr size_t Size = sizeof...(I) / (size_t(1) + R);");
+	code.print("static constexpr auto symmetries = []() { ");
+	code.indent();
+	code.print("std::array<Symmetry<R>, Size> syms;");
+	code.print("static constexpr size_t m = R + size_t(1);");
+	code.print("size_t i = -1;");
+	code.print("((((++i % m == 0) ? syms[i / m].sign : syms[i / m].values[(i % m) - 1]) = I), ...);");
+	code.print("return syms;");
+	code.dedent();
+	code.print("}();");
+	code.print("static constexpr bool hasAsymmetry = []() {");
+	code.indent();
+	code.print("static constexpr size_t m = R + size_t(1);");
+	code.print("bool rc = false;");
+	code.print("size_t i = -1;");
+	code.print("((rc = ((I < 0) && (++i % m == 0)) || rc), ...);");
+	code.print("return rc;");
+	code.dedent();
+	code.print("}();");
+	code.dedent();
+	code.print("};");
+	code.newline();
+	code.print("");
 }
 
 void includeFiles(CodeGen &code) {
