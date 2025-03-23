@@ -1,5 +1,0 @@
-/home/dmarce1/workspace/tensor/release/CMakeFiles/codegen.dir
-/home/dmarce1/workspace/tensor/release/CMakeFiles/generate_header.dir
-/home/dmarce1/workspace/tensor/release/CMakeFiles/test.dir
-/home/dmarce1/workspace/tensor/release/CMakeFiles/edit_cache.dir
-/home/dmarce1/workspace/tensor/release/CMakeFiles/rebuild_cache.dir

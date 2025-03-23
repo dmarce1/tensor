@@ -1,1 +1,0 @@
-/usr/bin/c++ -march=native -Ofast -DNDEBUG CMakeFiles/codegen.dir/src/codegen.cpp.o -o codegen 
